@@ -40,14 +40,28 @@ module LogStash; module Outputs; class AmazonElasticSearch; class HttpClient;
       instance_cred_retries = options[:instance_profile_credentials_retries] || 0
       instance_cred_timeout = options[:instance_profile_credentials_timeout] || 1
 
-      credential_config = CredentialConfig.new(aws_access_key_id, aws_secret_access_key, session_token, profile, instance_cred_retries, instance_cred_timeout, @region)
-      @credentials = Aws::CredentialProviderChain.new(credential_config).resolve
+
+      @credentials = if ENV['AWS_ROLE_ARN'] && ENV['AWS_WEB_IDENTITY_TOKEN_FILE']
+                       assume_role_with_web_identity
+                     else
+                       credential_config = CredentialConfig.new(aws_access_key_id, aws_secret_access_key, session_token, profile, instance_cred_retries, instance_cred_timeout, @region)
+                       Aws::CredentialProviderChain.new(credential_config).resolve
+                     end
 
       if options[:proxy]
         options[:proxy] = manticore_proxy_hash(options[:proxy])
       end
       
       @manticore = ::Manticore::Client.new(options)
+    end
+
+    def assume_role_with_web_identity
+      Aws::AssumeRoleWebIdentityCredentials.new(
+          :client => Aws::STS::Client.new(:region => @region),
+          :role_arn => ENV['AWS_ROLE_ARN'],
+          :web_identity_token_file => ENV['AWS_WEB_IDENTITY_TOKEN_FILE'],
+          :role_session_name => @role_session_name
+      )
     end
     
     # Transform the proxy option to a hash. Manticore's support for non-hash
